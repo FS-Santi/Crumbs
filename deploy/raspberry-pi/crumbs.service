@@ -1,0 +1,22 @@
+[Unit]
+Description=Crumbs voice assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=crumbs
+Group=crumbs
+WorkingDirectory=/opt/crumbs
+EnvironmentFile=/etc/crumbs/crumbs.env
+Environment=LD_LIBRARY_PATH=/opt/crumbs/node_modules/sherpa-onnx-linux-arm64
+ExecStart=/usr/bin/env node /opt/crumbs/index.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f1eadb">
+  <title>Crumbs the Toaster</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="kiosk" aria-label="Crumbs the toaster">
+    <section class="stage" aria-live="polite" aria-atomic="true">
+      <div class="crumbs" id="crumbs" data-mood="idle" data-design="toaster" role="img" aria-label="Crumbs is ready">
+        <div class="toast toast-left" aria-hidden="true"></div>
+        <div class="toast toast-right" aria-hidden="true"></div>
+        <div class="toaster">
+          <div class="slots" aria-hidden="true"><i></i><i></i></div>
+          <div class="face" aria-hidden="true">
+            <span class="brow brow-left"></span>
+            <span class="brow brow-right"></span>
+            <span class="eye eye-left"><i></i></span>
+            <span class="eye eye-right"><i></i></span>
+            <span class="cheek cheek-left"></span>
+            <span class="cheek cheek-right"></span>
+            <span class="mouth" id="mouth" data-viseme="rest"></span>
+          </div>
+          <div class="crumb-badge" aria-hidden="true">C</div>
+          <div class="lever" aria-hidden="true"><span></span></div>
+          <div class="toaster-feet" aria-hidden="true"><i></i><i></i></div>
+        </div>
+        <span class="spark spark-one" aria-hidden="true">✦</span>
+        <span class="spark spark-two" aria-hidden="true">✳</span>
+      </div>
+
+      <div class="status">
+        <p class="eyebrow">YOUR BREAKFAST COMPANION</p>
+        <h1>Crumbs</h1>
+        <p id="mood-label" class="mood-label">Ready when you are</p>
+      </div>
+    </section>
+
+    <p class="hint" id="start-hint">Touch anywhere for settings</p>
+
+    <div class="settings-overlay" id="settings-overlay" hidden aria-hidden="true">
+      <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <button class="settings-close" id="settings-close" type="button" aria-label="Close settings">×</button>
+        <p class="eyebrow">CRUMBS CONTROLS</p>
+        <h2 id="settings-title">Settings</h2>
+        <p class="settings-description">Pick the face you want to see.</p>
+        <div class="design-picker" role="group" aria-label="Choose Crumbs's face style">
+          <button class="design-option" type="button" data-design-select="toaster" aria-pressed="true">Toaster face</button>
+          <button class="design-option" type="button" data-design-select="minimal" aria-pressed="false">Eyes only</button>
+        </div>
+        <p class="settings-note" id="settings-note">Crumbs starts listening automatically. The browser may ask once for microphone access.</p>
+      </section>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

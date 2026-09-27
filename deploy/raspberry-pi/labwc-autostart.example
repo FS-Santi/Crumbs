@@ -1,0 +1,2 @@
+# Append this line to ~/.config/labwc/autostart after installing Crumbs.
+/opt/crumbs/deploy/raspberry-pi/crumbs-kiosk.sh >/tmp/crumbs-kiosk.log 2>&1 &
