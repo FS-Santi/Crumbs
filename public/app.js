@@ -341,13 +341,13 @@ let silenceStarted =
 // ============================================================
 
 const SILENCE_MS =
-  450;
+  1100;
 
 const MIN_RECORDING_MS =
   350;
 
 const MAX_RECORDING_MS =
-  15000;
+  30000;
 
 const BARGE_IN_MS =
   180;
@@ -355,9 +355,9 @@ const BARGE_IN_MS =
 const STT_SAMPLE_RATE =
   24000;
 
-// Crumbs remains conversational for 5 seconds.
+// Give the user time to begin speaking after the wake word.
 const AWAKE_TIMEOUT_MS =
-  5000;
+  15000;
 
 
 // ============================================================
