@@ -385,15 +385,16 @@ async function startCrumbs() {
       micStream =
         await navigator.mediaDevices
           .getUserMedia({
+            // Keep the Jabra's mic signal natural for Sherpa wake-word detection.
             audio: {
               echoCancellation:
-                true,
+                false,
 
               noiseSuppression:
-                true,
+                false,
 
               autoGainControl:
-                true
+                false
             }
           });
 
