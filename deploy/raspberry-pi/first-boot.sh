@@ -32,7 +32,7 @@ done
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get full-upgrade -y
-apt-get install -y ca-certificates curl git xz-utils chromium
+apt-get install -y ca-certificates curl git xz-utils chromium wireplumber
 
 # Node.js 24 LTS Linux ARM64 distribution.
 NODE_VERSION=v24.21.0
@@ -118,6 +118,50 @@ until curl -fsS "$APP_URL/" >/dev/null; do
   fi
   sleep 1
 done
+
+# Select the USB Jabra headset as both playback and capture default before
+# Chromium starts. PipeWire node IDs can change between boots, so discover them
+# by name each time instead of saving numeric IDs in the image.
+if command -v wpctl >/dev/null 2>&1; then
+  attempt=0
+  JABRA_SELECTED=0
+  while [ "$attempt" -lt 60 ]; do
+    JABRA_SINK_ID="$(wpctl list audio sinks 2>/dev/null | awk -F '\t' '
+      tolower($0) ~ /jabra/ {
+        if (match($1, /[0-9]+/)) {
+          print substr($1, RSTART, RLENGTH)
+          exit
+        }
+      }
+    ')"
+    JABRA_SOURCE_ID="$(wpctl list audio sources 2>/dev/null | awk -F '\t' '
+      tolower($0) ~ /jabra/ {
+        if (match($1, /[0-9]+/)) {
+          print substr($1, RSTART, RLENGTH)
+          exit
+        }
+      }
+    ')"
+
+    if [ -n "$JABRA_SINK_ID" ] && [ -n "$JABRA_SOURCE_ID" ]; then
+      if wpctl set-default "$JABRA_SINK_ID" && wpctl set-default "$JABRA_SOURCE_ID"; then
+        echo "Selected Jabra USB audio: sink=$JABRA_SINK_ID source=$JABRA_SOURCE_ID"
+        JABRA_SELECTED=1
+        break
+      fi
+    fi
+
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+
+  if [ "$JABRA_SELECTED" -ne 1 ]; then
+    echo "Jabra USB audio was not found; Chromium will use the system defaults."
+  fi
+else
+  echo "wpctl is unavailable; Chromium will use the system defaults."
+fi
+
 exec "$CHROMIUM" \
   --kiosk \
   --noerrdialogs \
