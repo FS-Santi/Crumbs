@@ -139,7 +139,7 @@ button { font: inherit; }
   align-items: flex-end;
   justify-content: center;
   isolation: isolate;
-  scale: 1.1;
+  scale: 1.21;
   animation: bob 3.7s ease-in-out infinite;
   --eye-height: 17px;
   --eye-scale: 1;

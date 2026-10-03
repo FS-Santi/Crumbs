@@ -220,6 +220,20 @@ function closeSettings() {
   settingsOverlay.setAttribute("aria-hidden", "true");
 }
 
+function tappedCenterOfFace(event) {
+  const face = crumbsFace.querySelector(".face");
+  if (!face) return false;
+
+  const bounds = face.getBoundingClientRect();
+  const insetX = bounds.width * 0.15;
+  const insetY = bounds.height * 0.1;
+
+  return event.clientX >= bounds.left + insetX &&
+    event.clientX <= bounds.right - insetX &&
+    event.clientY >= bounds.top + insetY &&
+    event.clientY <= bounds.bottom - insetY;
+}
+
 settingsClose.addEventListener("click", closeSettings);
 
 settingsOverlay.addEventListener("click", (event) => {
@@ -234,10 +248,12 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-document.addEventListener("pointerdown", () => {
+document.addEventListener("pointerdown", (event) => {
   if (!settingsOverlay.hidden) return;
 
-  openSettings();
+  if (tappedCenterOfFace(event)) {
+    openSettings();
+  }
 
   if (audioContext?.state === "suspended") {
     audioContext.resume().catch((error) => {
@@ -573,7 +589,7 @@ async function startCrumbs() {
         true;
 
       startHint.textContent =
-        "Touch anywhere for settings";
+        "Tap Crumbs for settings";
 
       settingsNote.textContent =
         "Crumbs is listening for his wake word.";
@@ -760,12 +776,12 @@ async function startCrumbs() {
       audioContext = null;
 
       startHint.textContent =
-        "Touch anywhere for settings or to retry";
+        "Tap Crumbs to retry";
 
       settingsNote.textContent =
-        "Microphone startup failed. Check browser microphone permission, then touch the screen to retry.";
+        "Microphone startup failed. Check browser microphone permission, then tap Crumbs to retry.";
 
-      setCrumbsMood("error", "I could not start listening. Touch the screen to try again.");
+      setCrumbsMood("error", "I could not start listening. Tap Crumbs to try again.");
     } finally {
       starting = false;
     }
