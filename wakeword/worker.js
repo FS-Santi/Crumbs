@@ -3,6 +3,7 @@ const { parentPort, workerData } = require("worker_threads");
 const sherpa = require("sherpa-onnx-node");
 
 const streams = new Map();
+const audioLevels = new Map();
 
 try {
   for (const file of [
@@ -31,8 +32,8 @@ try {
       debug: 0
     },
     maxActivePaths: 4,
-    keywordsScore: 1.5,
-    keywordsThreshold: 0.55,
+    keywordsScore: 2.0,
+    keywordsThreshold: 0.25,
     keywordsFile: workerData.keywordsFile
   });
 
@@ -41,6 +42,7 @@ try {
   parentPort.on("message", ({ type, clientId, pcm }) => {
     if (type === "close") {
       streams.delete(clientId);
+      audioLevels.delete(clientId);
       return;
     }
     if (type !== "audio") return;
@@ -53,10 +55,24 @@ try {
 
     const input = Buffer.from(pcm);
     const samples = new Float32Array(Math.floor(input.length / 2));
+    let chunkSquares = 0;
+    let chunkPeak = 0;
     for (let i = 0; i < samples.length; i++) {
-      samples[i] = input.readInt16LE(i * 2) / 32768;
+      const sample = input.readInt16LE(i * 2) / 32768;
+      samples[i] = sample;
+      chunkSquares += sample * sample;
+      chunkPeak = Math.max(chunkPeak, Math.abs(sample));
     }
     if (!samples.length) return;
+
+    let levels = audioLevels.get(clientId);
+    if (!levels) {
+      levels = { squares: 0, peak: 0, count: 0, lastReportAt: Date.now() };
+      audioLevels.set(clientId, levels);
+    }
+    levels.squares += chunkSquares;
+    levels.peak = Math.max(levels.peak, chunkPeak);
+    levels.count += samples.length;
 
     stream.acceptWaveform({ sampleRate: 16000, samples });
     while (spotter.isReady(stream)) {
@@ -68,6 +84,22 @@ try {
         parentPort.postMessage({ type: "wake", clientId });
         break;
       }
+    }
+
+    const now = Date.now();
+    if (now - levels.lastReportAt >= 1000) {
+      const rms = Math.sqrt(levels.squares / levels.count);
+      const toDbfs = (value) => value > 0 ? Math.max(-80, 20 * Math.log10(value)) : -80;
+      parentPort.postMessage({
+        type: "audio-level",
+        clientId,
+        rmsDbfs: toDbfs(rms),
+        peakDbfs: toDbfs(levels.peak)
+      });
+      levels.squares = 0;
+      levels.peak = 0;
+      levels.count = 0;
+      levels.lastReportAt = now;
     }
   });
 } catch (error) {

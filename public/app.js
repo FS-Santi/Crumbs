@@ -34,6 +34,9 @@ const micMeterStatus =
 const micMeterReadout =
   document.querySelector("#mic-meter-readout");
 
+const wakewordInputStatus =
+  document.querySelector("#wakeword-input-status");
+
 const designOptions =
   document.querySelectorAll("[data-design-select]");
 
@@ -353,6 +356,7 @@ let busy = false;
 let audioContext = null;
 let micStream = null;
 let micProcessor = null;
+let micWorkletNode = null;
 let silentGain = null;
 
 
@@ -447,6 +451,44 @@ const STT_SAMPLE_RATE =
 const AWAKE_TIMEOUT_MS =
   15000;
 
+function handleMicAudioFrame(input) {
+  // --------------------------------------------------------
+  // SLEEPING: local Sherpa only. Nothing from the room is sent to OpenAI.
+  // --------------------------------------------------------
+  if (
+    !awake &&
+    wakeReady &&
+    wakeSocket &&
+    wakeSocket.readyState === WebSocket.OPEN
+  ) {
+    const wakePCM = resampleToPCM16(
+      input,
+      audioContext.sampleRate,
+      wakeSampleRate
+    );
+
+    wakeSocket.send(wakePCM.buffer);
+  }
+
+  // --------------------------------------------------------
+  // AWAKE + ACTUALLY RECORDING USER: OpenAI realtime STT.
+  // --------------------------------------------------------
+  if (
+    sttStreaming &&
+    sttReady &&
+    sttSocket &&
+    sttSocket.readyState === WebSocket.OPEN
+  ) {
+    const sttPCM = resampleToPCM16(
+      input,
+      audioContext.sampleRate,
+      STT_SAMPLE_RATE
+    );
+
+    sttSocket.send(sttPCM.buffer);
+  }
+}
+
 
 // ============================================================
 // START CRUMBS
@@ -458,6 +500,9 @@ async function startCrumbs() {
   }
 
   starting = true;
+  micProcessor = null;
+  micWorkletNode = null;
+  silentGain = null;
 
     try {
       setCrumbsMood("starting");
@@ -528,14 +573,6 @@ async function startCrumbs() {
       //   -> OpenAI realtime STT
       // ======================================================
 
-      micProcessor =
-        audioContext
-          .createScriptProcessor(
-            2048,
-            1,
-            1
-          );
-
       silentGain =
         audioContext
           .createGain();
@@ -543,83 +580,43 @@ async function startCrumbs() {
       silentGain.gain.value =
         0;
 
-      source.connect(
-        micProcessor
-      );
+      if (audioContext.audioWorklet && typeof AudioWorkletNode === "function") {
+        try {
+          await audioContext.audioWorklet.addModule("/mic-capture-worklet.js");
+          micWorkletNode = new AudioWorkletNode(
+            audioContext,
+            "crumbs-mic-capture",
+            {
+              numberOfInputs: 1,
+              numberOfOutputs: 1,
+              outputChannelCount: [1]
+            }
+          );
+          micWorkletNode.port.onmessage = (event) => {
+            if (event.data instanceof ArrayBuffer) {
+              handleMicAudioFrame(new Float32Array(event.data));
+            }
+          };
+          source.connect(micWorkletNode);
+          micWorkletNode.connect(silentGain);
+          console.log("Microphone capture: AudioWorklet");
+        } catch (error) {
+          console.warn("AudioWorklet setup failed; using ScriptProcessor fallback", error);
+          micWorkletNode = null;
+        }
+      }
 
-      micProcessor.connect(
-        silentGain
-      );
-
-      silentGain.connect(
-        audioContext.destination
-      );
-
-      micProcessor.onaudioprocess =
-        (event) => {
-          const input =
-            event.inputBuffer
-              .getChannelData(
-                0
-              );
-
-
-          // --------------------------------------------------
-          // SLEEPING:
-          // Local Sherpa only.
-          // Nothing from the room is sent to OpenAI.
-          // --------------------------------------------------
-
-          if (
-            !awake &&
-
-            wakeReady &&
-
-            wakeSocket &&
-
-            wakeSocket.readyState ===
-              WebSocket.OPEN
-          ) {
-            const wakePCM =
-              resampleToPCM16(
-                input,
-                audioContext.sampleRate,
-                wakeSampleRate
-              );
-
-            wakeSocket.send(
-              wakePCM.buffer
-            );
-          }
-
-
-          // --------------------------------------------------
-          // AWAKE + ACTUALLY RECORDING USER:
-          // OpenAI realtime STT.
-          // --------------------------------------------------
-
-          if (
-            sttStreaming &&
-
-            sttReady &&
-
-            sttSocket &&
-
-            sttSocket.readyState ===
-              WebSocket.OPEN
-          ) {
-            const sttPCM =
-              resampleToPCM16(
-                input,
-                audioContext.sampleRate,
-                STT_SAMPLE_RATE
-              );
-
-            sttSocket.send(
-              sttPCM.buffer
-            );
-          }
+      if (!micWorkletNode) {
+        micProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+        micProcessor.onaudioprocess = (event) => {
+          handleMicAudioFrame(event.inputBuffer.getChannelData(0));
         };
+        source.connect(micProcessor);
+        micProcessor.connect(silentGain);
+        console.log("Microphone capture: ScriptProcessor fallback");
+      }
+
+      silentGain.connect(audioContext.destination);
 
 
       // ======================================================
@@ -1259,6 +1256,11 @@ function connectWakeWord() {
                 "Hz"
               );
 
+              if (wakewordInputStatus) {
+                wakewordInputStatus.textContent =
+                  "Wake engine connected; waiting for audio";
+              }
+
               if (
                 !settled
               ) {
@@ -1273,6 +1275,23 @@ function connectWakeWord() {
                   null;
 
                 resolve();
+              }
+
+              return;
+            }
+
+
+            if (
+              data.type ===
+              "audio-level"
+            ) {
+              if (wakewordInputStatus) {
+                const rms = Number(data.rmsDbfs);
+                const peak = Number(data.peakDbfs);
+                wakewordInputStatus.textContent =
+                  Number.isFinite(rms) && Number.isFinite(peak)
+                    ? `Sherpa input: ${Math.round(rms)} dBFS RMS, ${Math.round(peak)} dBFS peak`
+                    : "Sherpa is receiving audio";
               }
 
               return;
@@ -1302,6 +1321,10 @@ function connectWakeWord() {
                 "Wake-word error:",
                 data.error
               );
+
+              if (wakewordInputStatus) {
+                wakewordInputStatus.textContent = "Wake engine error";
+              }
 
               if (
                 !settled
@@ -1354,6 +1377,10 @@ function connectWakeWord() {
           () => {
             wakeReady =
               false;
+
+            if (wakewordInputStatus) {
+              wakewordInputStatus.textContent = "Wake engine disconnected";
+            }
 
             if (
               wakeSocket ===

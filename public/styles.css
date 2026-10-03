@@ -159,6 +159,8 @@ button { font: inherit; }
   transition: transform .12s linear;
 }
 .mic-meter-readout { margin: 5px 0 0; color: #9a8876; font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
+.mic-meter-engine { margin: 7px 0 0; color: #887669; font-size: 11px; line-height: 1.35; }
+.mic-meter[data-state="signal"] .mic-meter-engine { color: #438067; }
 .settings-note { min-height: 20px; margin: 12px 0 0; color: #9a8876; font-size: 12px; line-height: 1.45; }
 
 .crumbs {

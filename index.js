@@ -204,6 +204,15 @@ wakeWordWorker.on("message", (message) => {
       }
     }
     wakeClients.clear();
+  } else if (message.type === "audio-level") {
+    const socket = wakeClients.get(message.clientId);
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: "audio-level",
+        rmsDbfs: message.rmsDbfs,
+        peakDbfs: message.peakDbfs
+      }));
+    }
   } else if (message.type === "wake") {
     const socket = wakeClients.get(message.clientId);
     if (socket?.readyState === WebSocket.OPEN) {
