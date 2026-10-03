@@ -119,8 +119,16 @@ until curl -fsS "$APP_URL/" >/dev/null; do
   sleep 1
 done
 
-# Let the USB device settle, then reset PipeWire before Chromium opens audio.
-# Some Pi boots expose the Jabra only after the first user audio stack restart.
+# Start Chromium so the desktop audio session and browser client initialize.
+# This Pi's known-good recovery is restarting PipeWire after the kiosk loads.
+CHROMIUM_PROFILE="$HOME/.config/chromium-crumbs"
+"$CHROMIUM" --kiosk --noerrdialogs --disable-infobars --no-first-run \
+  --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream \
+  --user-data-dir="$CHROMIUM_PROFILE" "$APP_URL" &
+PRIMING_CHROMIUM_PID=$!
+sleep 8
+
+# Restart audio only after the graphical session and Chromium are active.
 sleep 2
 if command -v wpctl >/dev/null 2>&1; then
   JABRA_SELECTED=0
@@ -176,6 +184,12 @@ else
   echo "wpctl is unavailable; Chromium will use the system defaults."
 fi
 
+# Restarting PipeWire may leave Chromium's old capture stream stale. Reopen the
+# kiosk with a fresh browser process after audio recovery.
+pkill -u "$(id -u)" -f -- "$CHROMIUM_PROFILE" 2>/dev/null || true
+wait "$PRIMING_CHROMIUM_PID" 2>/dev/null || true
+sleep 1
+
 exec "$CHROMIUM" \
   --kiosk \
   --noerrdialogs \
@@ -183,7 +197,7 @@ exec "$CHROMIUM" \
   --no-first-run \
   --autoplay-policy=no-user-gesture-required \
   --use-fake-ui-for-media-stream \
-  --user-data-dir="$HOME/.config/chromium-crumbs" \
+  --user-data-dir="$CHROMIUM_PROFILE" \
   "$APP_URL"
 CRUMBS_KIOSK
 chmod 0755 /opt/crumbs/deploy/raspberry-pi/crumbs-kiosk.sh
