@@ -1121,7 +1121,7 @@ function connectWakeWord() {
               );
             },
 
-            10000
+            120000
           );
 
 

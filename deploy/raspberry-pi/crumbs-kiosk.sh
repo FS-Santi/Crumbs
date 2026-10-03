@@ -35,7 +35,7 @@ fi
 if command -v wpctl >/dev/null 2>&1; then
   attempt=0
   JABRA_SELECTED=0
-  while [ "$attempt" -lt 60 ]; do
+  while [ "$attempt" -lt 10 ]; do
     JABRA_SINK_ID="$(wpctl list audio sinks 2>/dev/null | awk -F '\t' '
       tolower($0) ~ /jabra/ {
         if (match($1, /[0-9]+/)) {

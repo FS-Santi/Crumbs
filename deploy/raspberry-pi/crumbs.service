@@ -1,7 +1,6 @@
 [Unit]
 Description=Crumbs voice assistant
-After=network-online.target
-Wants=network-online.target
+After=local-fs.target
 
 [Service]
 Type=simple
