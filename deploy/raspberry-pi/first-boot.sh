@@ -134,20 +134,35 @@ if command -v wpctl >/dev/null 2>&1; then
     fi
 
     attempt=0
+    JABRA_FOUND=0
     while [ "$attempt" -lt 10 ]; do
       JABRA_SINK_ID="$(wpctl list audio sinks 2>/dev/null | awk -F '\t' 'tolower($0) ~ /jabra/ { if (match($1, /[0-9]+/)) { print substr($1, RSTART, RLENGTH); exit } }')"
       JABRA_SOURCE_ID="$(wpctl list audio sources 2>/dev/null | awk -F '\t' 'tolower($0) ~ /jabra/ { if (match($1, /[0-9]+/)) { print substr($1, RSTART, RLENGTH); exit } }')"
 
       if [ -n "$JABRA_SINK_ID" ] && [ -n "$JABRA_SOURCE_ID" ] &&
         wpctl set-default "$JABRA_SINK_ID" && wpctl set-default "$JABRA_SOURCE_ID"; then
-        echo "Jabra audio ready: sink=$JABRA_SINK_ID source=$JABRA_SOURCE_ID"
-        JABRA_SELECTED=1
+        JABRA_FOUND=1
         break
       fi
 
       attempt=$((attempt + 1))
       sleep 1
     done
+
+    if [ "$JABRA_FOUND" -eq 1 ]; then
+      PROBE_FILE="/tmp/crumbs-audio-probe-$$.wav"
+      rm -f "$PROBE_FILE"
+      echo "Checking that Jabra capture delivers audio frames."
+      timeout --signal=INT --kill-after=2s 2s pw-record --target "$JABRA_SOURCE_ID" "$PROBE_FILE" >/dev/null 2>&1 || true
+      CAPTURE_BYTES="$(wc -c < "$PROBE_FILE" 2>/dev/null || echo 0)"
+      rm -f "$PROBE_FILE"
+      if [ "$CAPTURE_BYTES" -gt 44 ]; then
+        echo "Jabra audio ready: sink=$JABRA_SINK_ID source=$JABRA_SOURCE_ID (${CAPTURE_BYTES} capture bytes)."
+        JABRA_SELECTED=1
+      else
+        echo "Jabra node appeared but captured no audio data; restarting PipeWire."
+      fi
+    fi
 
     [ "$JABRA_SELECTED" -eq 1 ] && break
     echo "Jabra capture/playback not ready after this PipeWire restart."
