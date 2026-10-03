@@ -1,1 +1,1 @@
-K R AH1 M Z :2.0 #0.25 @CRUMBS
+K R AH1 M Z :3.0 #0.1 @CRUMBS
