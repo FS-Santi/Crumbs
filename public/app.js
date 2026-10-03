@@ -356,7 +356,6 @@ let busy = false;
 let audioContext = null;
 let micStream = null;
 let micProcessor = null;
-let micWorkletNode = null;
 let silentGain = null;
 
 
@@ -501,7 +500,6 @@ async function startCrumbs() {
 
   starting = true;
   micProcessor = null;
-  micWorkletNode = null;
   silentGain = null;
 
     try {
@@ -519,16 +517,10 @@ async function startCrumbs() {
       micStream =
         await navigator.mediaDevices
           .getUserMedia({
-            // Keep the Jabra's mic signal natural for Sherpa wake-word detection.
             audio: {
-              echoCancellation:
-                false,
-
-              noiseSuppression:
-                false,
-
-              autoGainControl:
-                false
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
             }
           });
 
@@ -580,41 +572,13 @@ async function startCrumbs() {
       silentGain.gain.value =
         0;
 
-      if (audioContext.audioWorklet && typeof AudioWorkletNode === "function") {
-        try {
-          await audioContext.audioWorklet.addModule("/mic-capture-worklet.js");
-          micWorkletNode = new AudioWorkletNode(
-            audioContext,
-            "crumbs-mic-capture",
-            {
-              numberOfInputs: 1,
-              numberOfOutputs: 1,
-              outputChannelCount: [1]
-            }
-          );
-          micWorkletNode.port.onmessage = (event) => {
-            if (event.data instanceof ArrayBuffer) {
-              handleMicAudioFrame(new Float32Array(event.data));
-            }
-          };
-          source.connect(micWorkletNode);
-          micWorkletNode.connect(silentGain);
-          console.log("Microphone capture: AudioWorklet");
-        } catch (error) {
-          console.warn("AudioWorklet setup failed; using ScriptProcessor fallback", error);
-          micWorkletNode = null;
-        }
-      }
-
-      if (!micWorkletNode) {
-        micProcessor = audioContext.createScriptProcessor(2048, 1, 1);
-        micProcessor.onaudioprocess = (event) => {
-          handleMicAudioFrame(event.inputBuffer.getChannelData(0));
-        };
-        source.connect(micProcessor);
-        micProcessor.connect(silentGain);
-        console.log("Microphone capture: ScriptProcessor fallback");
-      }
+      micProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+      micProcessor.onaudioprocess = (event) => {
+        handleMicAudioFrame(event.inputBuffer.getChannelData(0));
+      };
+      source.connect(micProcessor);
+      micProcessor.connect(silentGain);
+      console.log("Microphone capture: ScriptProcessor (known-good path)");
 
       silentGain.connect(audioContext.destination);
 
@@ -1288,6 +1252,9 @@ function connectWakeWord() {
               if (wakewordInputStatus) {
                 const rms = Number(data.rmsDbfs);
                 const peak = Number(data.peakDbfs);
+                if (Number.isFinite(rms)) {
+                  updateMicMeter(Math.pow(10, rms / 20), performance.now());
+                }
                 wakewordInputStatus.textContent =
                   Number.isFinite(rms) && Number.isFinite(peak)
                     ? `Sherpa input: ${Math.round(rms)} dBFS RMS, ${Math.round(peak)} dBFS peak`

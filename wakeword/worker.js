@@ -32,8 +32,8 @@ try {
       debug: 0
     },
     maxActivePaths: 4,
-    keywordsScore: 3.0,
-    keywordsThreshold: 0.1,
+    keywordsScore: 1.5,
+    keywordsThreshold: 0.25,
     keywordsFile: workerData.keywordsFile
   });
 
