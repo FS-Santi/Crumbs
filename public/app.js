@@ -19,8 +19,80 @@ const settingsClose =
 const settingsNote =
   document.querySelector("#settings-note");
 
+const micMeter =
+  document.querySelector("#mic-meter");
+
+const micMeterTrack =
+  document.querySelector("#mic-meter-track");
+
+const micMeterFill =
+  document.querySelector("#mic-meter-fill");
+
+const micMeterStatus =
+  document.querySelector("#mic-meter-status");
+
+const micMeterReadout =
+  document.querySelector("#mic-meter-readout");
+
 const designOptions =
   document.querySelectorAll("[data-design-select]");
+
+let lastMicMeterUpdate = 0;
+let micMeterTimer = null;
+
+function setMicMeterStatus(state, label) {
+  if (!micMeter || !micMeterStatus) return;
+
+  micMeter.dataset.state = state;
+  micMeterStatus.textContent = label;
+}
+
+function updateMicMeter(rms, now) {
+  if (
+    !micMeterTrack ||
+    !micMeterFill ||
+    !micMeterReadout ||
+    now - lastMicMeterUpdate < 100
+  ) {
+    return;
+  }
+
+  lastMicMeterUpdate = now;
+  const dbfs = rms > 0 ? Math.max(-80, 20 * Math.log10(rms)) : -80;
+  const level = Math.max(0, Math.min(100, ((dbfs + 60) / 48) * 100));
+  const hasSignal = dbfs > -48;
+
+  micMeterFill.style.transform = `scaleX(${level / 100})`;
+  micMeterTrack.setAttribute("aria-valuenow", String(Math.round(level)));
+  micMeterTrack.setAttribute("aria-valuetext", `${Math.round(dbfs)} dBFS`);
+  micMeterReadout.textContent = `${Math.round(dbfs)} dBFS`;
+  setMicMeterStatus(
+    hasSignal ? "signal" : "quiet",
+    hasSignal ? "Signal detected" : "Very quiet or no signal"
+  );
+}
+
+function startMicMeter(analyser) {
+  if (micMeterTimer !== null) {
+    clearTimeout(micMeterTimer);
+  }
+
+  const samples = new Float32Array(analyser.fftSize);
+
+  function sampleMicLevel() {
+    analyser.getFloatTimeDomainData(samples);
+
+    let sum = 0;
+    for (const sample of samples) {
+      sum += sample * sample;
+    }
+
+    updateMicMeter(Math.sqrt(sum / samples.length), performance.now());
+    micMeterTimer = setTimeout(sampleMicLevel, 100);
+  }
+
+  sampleMicLevel();
+}
 
 const moodDescriptions = {
   idle: "Ready when you are",
@@ -389,6 +461,7 @@ async function startCrumbs() {
 
     try {
       setCrumbsMood("starting");
+      setMicMeterStatus("waiting", "Starting mic…");
       settingsNote.textContent = "Starting Crumbs...";
 
       audioContext =
@@ -414,6 +487,8 @@ async function startCrumbs() {
             }
           });
 
+      setMicMeterStatus("ready", "Mic opened — speak to test");
+
       // Acquiring the mic can unlock Web Audio in browser kiosk sessions.
       // If autoplay policy still suspends it, the screen-touch handler retries.
       await audioContext.resume();
@@ -434,6 +509,8 @@ async function startCrumbs() {
       source.connect(
         analyser
       );
+
+      startMicMeter(analyser);
 
       const samples =
         new Float32Array(
@@ -592,7 +669,7 @@ async function startCrumbs() {
         "Tap Crumbs for settings";
 
       settingsNote.textContent =
-        "Crumbs is listening for his wake word.";
+        "Speak near the Jabra; the meter shows the microphone signal reaching Chromium.";
 
       goToSleep();
 
@@ -763,6 +840,11 @@ async function startCrumbs() {
         error
       );
 
+      if (micMeterTimer !== null) {
+        clearTimeout(micMeterTimer);
+        micMeterTimer = null;
+      }
+
       if (micStream) {
         for (const track of micStream.getTracks()) {
           track.stop();
@@ -782,6 +864,7 @@ async function startCrumbs() {
         "Microphone startup failed. Check browser microphone permission, then tap Crumbs to retry.";
 
       setCrumbsMood("error", "I could not start listening. Tap Crumbs to try again.");
+      setMicMeterStatus("error", "Audio startup failed");
     } finally {
       starting = false;
     }
