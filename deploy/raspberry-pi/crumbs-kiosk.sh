@@ -3,6 +3,9 @@ set -eu
 
 APP_URL="${CRUMBS_URL:-http://127.0.0.1:3000}"
 CHROMIUM="$(command -v chromium || command -v chromium-browser || true)"
+AUDIO_MAX_WAIT_SECONDS="${CRUMBS_AUDIO_MAX_WAIT_SECONDS:-90}"
+AUDIO_STABLE_POLLS="${CRUMBS_AUDIO_STABLE_POLLS:-5}"
+AUDIO_SETTLE_SECONDS="${CRUMBS_AUDIO_SETTLE_SECONDS:-15}"
 
 echo "=== Crumbs kiosk audio startup ==="
 if [ -r /etc/os-release ]; then
@@ -10,12 +13,10 @@ if [ -r /etc/os-release ]; then
   echo "OS: ${PRETTY_NAME:-unknown}"
 fi
 echo "Kernel: $(uname -r)"
-for AUDIO_COMMAND in pipewire wireplumber; do
-  if command -v "$AUDIO_COMMAND" >/dev/null 2>&1; then
-    AUDIO_VERSION="$("$AUDIO_COMMAND" --version 2>&1 | sed -n '1p')"
-    echo "$AUDIO_COMMAND: $AUDIO_VERSION"
-  fi
-done
+if command -v dpkg-query >/dev/null 2>&1; then
+  echo "Audio package versions:"
+  dpkg-query -W -f='${binary:Package} ${Version}\n' pipewire pipewire-bin pipewire-pulse wireplumber 2>/dev/null || true
+fi
 
 find_jabra_node_id() {
   STATUS_TEXT="$1"
@@ -51,19 +52,16 @@ until wget -q -O /dev/null "${APP_URL%/}/healthz"; do
 done
 
 # WirePlumber's Jabra-specific rule is loaded by its user service at login.
-# Trixie's WirePlumber 0.5.8 has `wpctl status`, but not the newer `wpctl list`
-# subcommand. Parse status output so this works on the installed OS version.
+# Wait until both nodes stay available across multiple checks, set them as
+# defaults, then give the PipeWire graph time to settle before Chromium opens
+# its microphone stream. On the Pi, nodes can appear before capture is ready.
 if command -v wpctl >/dev/null 2>&1; then
-  if AUDIO_STATUS="$(wpctl status -n 2>&1)"; then
-    echo "PipeWire audio topology before device selection:"
-    printf '%s\n' "$AUDIO_STATUS" | sed -n '/^Audio$/,/^Video$/p'
-  else
-    echo "wpctl status failed: $AUDIO_STATUS"
-  fi
-
   JABRA_SELECTED=0
   attempt=0
-  while [ "$attempt" -lt 20 ]; do
+  stable_polls=0
+  previous_sink=""
+  previous_source=""
+  while [ "$attempt" -lt "$AUDIO_MAX_WAIT_SECONDS" ]; do
     if AUDIO_STATUS="$(wpctl status -n 2>&1)"; then
       JABRA_SINK_ID="$(find_jabra_node_id "$AUDIO_STATUS" sink)"
       JABRA_SOURCE_ID="$(find_jabra_node_id "$AUDIO_STATUS" source)"
@@ -75,19 +73,56 @@ if command -v wpctl >/dev/null 2>&1; then
       fi
     fi
 
-    if [ -n "$JABRA_SINK_ID" ] && [ -n "$JABRA_SOURCE_ID" ] &&
-      wpctl set-default "$JABRA_SINK_ID" && wpctl set-default "$JABRA_SOURCE_ID"; then
-      echo "Jabra SPEAK 410 selected: sink=$JABRA_SINK_ID source=$JABRA_SOURCE_ID"
-      JABRA_SELECTED=1
-      break
+    if [ -n "$JABRA_SINK_ID" ] && [ -n "$JABRA_SOURCE_ID" ]; then
+      if [ "$JABRA_SINK_ID" = "$previous_sink" ] && [ "$JABRA_SOURCE_ID" = "$previous_source" ]; then
+        stable_polls=$((stable_polls + 1))
+      else
+        stable_polls=1
+        previous_sink="$JABRA_SINK_ID"
+        previous_source="$JABRA_SOURCE_ID"
+        echo "Jabra nodes detected; waiting for stable PipeWire startup."
+      fi
+
+      if [ "$stable_polls" -ge "$AUDIO_STABLE_POLLS" ] &&
+        wpctl set-default "$JABRA_SINK_ID" && wpctl set-default "$JABRA_SOURCE_ID"; then
+        echo "Jabra SPEAK 410 selected: sink=$JABRA_SINK_ID source=$JABRA_SOURCE_ID"
+        echo "Allowing ${AUDIO_SETTLE_SECONDS}s for PipeWire and USB audio to settle before Chromium starts."
+        sleep "$AUDIO_SETTLE_SECONDS"
+
+        if AUDIO_STATUS="$(wpctl status -n 2>&1)"; then
+          settled_sink="$(find_jabra_node_id "$AUDIO_STATUS" sink)"
+          settled_source="$(find_jabra_node_id "$AUDIO_STATUS" source)"
+        else
+          settled_sink=""
+          settled_source=""
+        fi
+
+        if [ "$settled_sink" = "$JABRA_SINK_ID" ] && [ "$settled_source" = "$JABRA_SOURCE_ID" ] &&
+          wpctl set-default "$settled_sink" && wpctl set-default "$settled_source"; then
+          echo "Jabra audio remained stable through settling period; launching Chromium."
+          echo "PipeWire audio topology at Chromium launch:"
+          printf '%s\n' "$AUDIO_STATUS" | sed -n '/^Audio$/,/^Video$/p'
+          JABRA_SELECTED=1
+          break
+        fi
+
+        echo "Jabra audio changed during settling; waiting for it to stabilize again."
+        stable_polls=0
+        previous_sink=""
+        previous_source=""
+      fi
+    else
+      stable_polls=0
+      previous_sink=""
+      previous_source=""
     fi
 
-    attempt=$((attempt + 1))
-    sleep 1
+    attempt=$((attempt + 2))
+    sleep 2
   done
 
   if [ "$JABRA_SELECTED" -ne 1 ]; then
-    echo "Jabra SPEAK 410 sink/source were not found in wpctl status; launching with current defaults."
+    echo "Jabra audio did not stabilize within ${AUDIO_MAX_WAIT_SECONDS}s; launching Crumbs with current defaults."
     if [ -n "${AUDIO_STATUS:-}" ]; then
       echo "Last WirePlumber audio topology:"
       printf '%s\n' "$AUDIO_STATUS" | sed -n '/^Audio$/,/^Video$/p'
