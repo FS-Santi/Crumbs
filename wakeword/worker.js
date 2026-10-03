@@ -32,7 +32,7 @@ try {
     },
     maxActivePaths: 4,
     keywordsScore: 1.5,
-    keywordsThreshold: 0.25,
+    keywordsThreshold: 0.55,
     keywordsFile: workerData.keywordsFile
   });
 
