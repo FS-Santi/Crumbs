@@ -119,52 +119,43 @@ until curl -fsS "$APP_URL/" >/dev/null; do
   sleep 1
 done
 
-# Reset the PipeWire user session before any application opens the microphone.
-# Restarting it after Chromium starts destroys the stream Chromium is using.
-if systemctl --user restart pipewire pipewire-pulse wireplumber; then
-  echo "PipeWire audio session restarted before Chromium startup."
-else
-  echo "PipeWire restart failed; continuing with the existing audio session."
-fi
-
-# Select the USB Jabra headset as both playback and capture default before
-# Chromium starts. PipeWire node IDs can change between boots, so discover them
-# by name each time instead of saving numeric IDs in the image.
+# Let the USB device settle, then reset PipeWire before Chromium opens audio.
+# Some Pi boots expose the Jabra only after the first user audio stack restart.
+sleep 2
 if command -v wpctl >/dev/null 2>&1; then
-  attempt=0
   JABRA_SELECTED=0
-  while [ "$attempt" -lt 10 ]; do
-    JABRA_SINK_ID="$(wpctl list audio sinks 2>/dev/null | awk -F '\t' '
-      tolower($0) ~ /jabra/ {
-        if (match($1, /[0-9]+/)) {
-          print substr($1, RSTART, RLENGTH)
-          exit
-        }
-      }
-    ')"
-    JABRA_SOURCE_ID="$(wpctl list audio sources 2>/dev/null | awk -F '\t' '
-      tolower($0) ~ /jabra/ {
-        if (match($1, /[0-9]+/)) {
-          print substr($1, RSTART, RLENGTH)
-          exit
-        }
-      }
-    ')"
+  restart_attempt=1
+  while [ "$restart_attempt" -le 3 ]; do
+    echo "Starting PipeWire audio recovery attempt $restart_attempt/3."
+    if systemctl --user restart pipewire pipewire-pulse wireplumber; then
+      echo "PipeWire user audio services restarted."
+    else
+      echo "PipeWire restart reported an error; checking device availability anyway."
+    fi
 
-    if [ -n "$JABRA_SINK_ID" ] && [ -n "$JABRA_SOURCE_ID" ]; then
-      if wpctl set-default "$JABRA_SINK_ID" && wpctl set-default "$JABRA_SOURCE_ID"; then
-        echo "Selected Jabra USB audio: sink=$JABRA_SINK_ID source=$JABRA_SOURCE_ID"
+    attempt=0
+    while [ "$attempt" -lt 10 ]; do
+      JABRA_SINK_ID="$(wpctl list audio sinks 2>/dev/null | awk -F '\t' 'tolower($0) ~ /jabra/ { if (match($1, /[0-9]+/)) { print substr($1, RSTART, RLENGTH); exit } }')"
+      JABRA_SOURCE_ID="$(wpctl list audio sources 2>/dev/null | awk -F '\t' 'tolower($0) ~ /jabra/ { if (match($1, /[0-9]+/)) { print substr($1, RSTART, RLENGTH); exit } }')"
+
+      if [ -n "$JABRA_SINK_ID" ] && [ -n "$JABRA_SOURCE_ID" ] &&
+        wpctl set-default "$JABRA_SINK_ID" && wpctl set-default "$JABRA_SOURCE_ID"; then
+        echo "Jabra audio ready: sink=$JABRA_SINK_ID source=$JABRA_SOURCE_ID"
         JABRA_SELECTED=1
         break
       fi
-    fi
 
-    attempt=$((attempt + 1))
-    sleep 1
+      attempt=$((attempt + 1))
+      sleep 1
+    done
+
+    [ "$JABRA_SELECTED" -eq 1 ] && break
+    echo "Jabra capture/playback not ready after this PipeWire restart."
+    restart_attempt=$((restart_attempt + 1))
   done
 
   if [ "$JABRA_SELECTED" -ne 1 ]; then
-    echo "Jabra USB audio was not found; Chromium will use the system defaults."
+    echo "Jabra audio unavailable after 3 recovery attempts; launching Chromium with current defaults."
   fi
 else
   echo "wpctl is unavailable; Chromium will use the system defaults."
