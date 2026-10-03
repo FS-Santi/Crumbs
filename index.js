@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const http = require("http");
 require("dotenv").config({
@@ -10,7 +11,7 @@ const { toFile } = require("openai");
 const WebSocket = require("ws");
 const { WebSocketServer } = require("ws");
 const { ElevenLabsClient } = require("@elevenlabs/elevenlabs-js");
-const { Worker } = require("worker_threads");
+const sherpa = require("sherpa-onnx-node");
 
 const app = express();
 const server = http.createServer(app);
@@ -21,7 +22,7 @@ app.use(express.static(path.join(__dirname, "public")));
 app.get("/healthz", (_req, res) => {
   res.json({
     status: "ok",
-    wakeWordEnabled: wakeWordReady
+    wakeWordEnabled: Boolean(keywordSpotter)
   });
 });
 
@@ -176,55 +177,46 @@ const wakeFiles = {
   )
 };
 
-let wakeWordReady = false;
-let wakeWordError = null;
-let nextWakeClientId = 1;
-const wakeClients = new Map();
-const wakeWordWorker = new Worker(
-  path.join(__dirname, "wakeword/worker.js"),
-  { workerData: { wakeFiles, keywordsFile: WAKE_KEYWORDS_FILE } }
-);
+let keywordSpotter = null;
 
-wakeWordWorker.on("message", (message) => {
-  if (message.type === "ready") {
-    wakeWordReady = true;
-    console.log("Wake word ready: CRUMBS");
-    for (const socket of wakeClients.values()) {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "config", sampleRate: 16000 }));
-      }
-    }
-  } else if (message.type === "error") {
-    wakeWordError = message.error;
-    console.warn("⚠️ Wake word error:", message.error);
-    for (const socket of wakeClients.values()) {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "error", error: message.error }));
-        socket.close();
-      }
-    }
-    wakeClients.clear();
-  } else if (message.type === "audio-level") {
-    const socket = wakeClients.get(message.clientId);
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        type: "audio-level",
-        rmsDbfs: message.rmsDbfs,
-        peakDbfs: message.peakDbfs
-      }));
-    }
-  } else if (message.type === "wake") {
-    const socket = wakeClients.get(message.clientId);
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "wake", label: "Crumbs" }));
+try {
+  const requiredFiles = [
+    wakeFiles.encoder,
+    wakeFiles.decoder,
+    wakeFiles.joiner,
+    wakeFiles.tokens,
+    WAKE_KEYWORDS_FILE
+  ];
+
+  for (const file of requiredFiles) {
+    if (!fs.existsSync(file)) {
+      throw new Error(`Missing wake-word file: ${file}`);
     }
   }
-});
 
-wakeWordWorker.on("error", (error) => {
-  wakeWordError = error.message;
-  console.error("Wake-word worker failed:", error);
-});
+  keywordSpotter = new sherpa.KeywordSpotter({
+    featConfig: { sampleRate: 16000, featureDim: 80 },
+    modelConfig: {
+      transducer: {
+        encoder: wakeFiles.encoder,
+        decoder: wakeFiles.decoder,
+        joiner: wakeFiles.joiner
+      },
+      tokens: wakeFiles.tokens,
+      numThreads: 1,
+      provider: "cpu",
+      debug: 0
+    },
+    maxActivePaths: 4,
+    keywordsScore: 1.5,
+    keywordsThreshold: 0.25,
+    keywordsFile: WAKE_KEYWORDS_FILE
+  });
+
+  console.log("Wake word ready: CRUMBS");
+} catch (error) {
+  console.warn("⚠️ Wake word error:", error.message);
+}
 
 
 // ============================================================
@@ -579,32 +571,70 @@ wakeWordWss.on(
       "👂 Browser connected to local wake word"
     );
 
-    if (wakeWordError) {
+    if (!keywordSpotter) {
       browserSocket.send(
         JSON.stringify({
           type: "error",
-          error: wakeWordError
+          error: "Sherpa wake-word model is not configured. Check the model files, WAKE_MODEL_DIR, and WAKE_KEYWORDS_FILE."
         })
       );
       browserSocket.close();
       return;
     }
 
-    const clientId = nextWakeClientId++;
-    wakeClients.set(clientId, browserSocket);
-    if (wakeWordReady) {
-      browserSocket.send(JSON.stringify({ type: "config", sampleRate: 16000 }));
-    }
+    const keywordStream = keywordSpotter.createStream();
+    let levelSquares = 0;
+    let levelPeak = 0;
+    let levelCount = 0;
+    let lastLevelReportAt = Date.now();
+
+    browserSocket.send(JSON.stringify({ type: "config", sampleRate: 16000 }));
 
     browserSocket.on(
       "message",
       (data, isBinary) => {
-        if (isBinary && wakeWordReady && browserSocket.readyState === WebSocket.OPEN) {
-          wakeWordWorker.postMessage({
-            type: "audio",
-            clientId,
-            pcm: Buffer.from(data)
-          });
+        if (!isBinary) return;
+
+        const pcm = Buffer.from(data);
+        const sampleCount = Math.floor(pcm.length / 2);
+        if (sampleCount === 0) return;
+
+        const samples = new Float32Array(sampleCount);
+        for (let i = 0; i < sampleCount; i++) {
+          const sample = pcm.readInt16LE(i * 2) / 32768;
+          samples[i] = sample;
+          levelSquares += sample * sample;
+          levelPeak = Math.max(levelPeak, Math.abs(sample));
+          levelCount++;
+        }
+
+        keywordStream.acceptWaveform({ sampleRate: 16000, samples });
+        while (keywordSpotter.isReady(keywordStream)) {
+          keywordSpotter.decode(keywordStream);
+          const result = keywordSpotter.getResult(keywordStream);
+          if (result.keyword) {
+            console.log("👀 WAKE WORD DETECTED:", result.keyword);
+            keywordSpotter.reset(keywordStream);
+            if (browserSocket.readyState === WebSocket.OPEN) {
+              browserSocket.send(JSON.stringify({ type: "wake", label: "Crumbs" }));
+            }
+            break;
+          }
+        }
+
+        const now = Date.now();
+        if (now - lastLevelReportAt >= 1000 && browserSocket.readyState === WebSocket.OPEN) {
+          const rms = Math.sqrt(levelSquares / Math.max(1, levelCount));
+          const toDbfs = (value) => value > 0 ? Math.max(-80, 20 * Math.log10(value)) : -80;
+          browserSocket.send(JSON.stringify({
+            type: "audio-level",
+            rmsDbfs: toDbfs(rms),
+            peakDbfs: toDbfs(levelPeak)
+          }));
+          levelSquares = 0;
+          levelPeak = 0;
+          levelCount = 0;
+          lastLevelReportAt = now;
         }
       }
     );
@@ -612,8 +642,6 @@ wakeWordWss.on(
     browserSocket.on(
       "close",
       () => {
-        wakeClients.delete(clientId);
-        wakeWordWorker.postMessage({ type: "close", clientId });
         console.log(
           "👂 Browser disconnected from local wake word"
         );
