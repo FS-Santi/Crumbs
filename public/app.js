@@ -41,7 +41,6 @@ const designOptions =
   document.querySelectorAll("[data-design-select]");
 
 let lastMicMeterUpdate = 0;
-let micMeterTimer = null;
 
 function setMicMeterStatus(state, label) {
   if (!micMeter || !micMeterStatus) return;
@@ -73,28 +72,6 @@ function updateMicMeter(rms, now) {
     hasSignal ? "signal" : "quiet",
     hasSignal ? "Signal detected" : "Very quiet or no signal"
   );
-}
-
-function startMicMeter(analyser) {
-  if (micMeterTimer !== null) {
-    clearTimeout(micMeterTimer);
-  }
-
-  const samples = new Float32Array(analyser.fftSize);
-
-  function sampleMicLevel() {
-    analyser.getFloatTimeDomainData(samples);
-
-    let sum = 0;
-    for (const sample of samples) {
-      sum += sample * sample;
-    }
-
-    updateMicMeter(Math.sqrt(sum / samples.length), performance.now());
-    micMeterTimer = setTimeout(sampleMicLevel, 100);
-  }
-
-  sampleMicLevel();
 }
 
 const moodDescriptions = {
@@ -408,8 +385,6 @@ let wakeConnectPromise = null;
 let wakeSampleRate =
   16000;
 
-let wakeResampler = null;
-
 let awake = false;
 
 let awakeTimer = null;
@@ -462,9 +437,11 @@ function handleMicAudioFrame(input) {
     wakeSocket &&
     wakeSocket.readyState === WebSocket.OPEN
   ) {
-    const wakePCM = wakeResampler
-      ? wakeResampler(input)
-      : resampleToPCM16(input, audioContext.sampleRate, wakeSampleRate);
+    const wakePCM = resampleToPCM16(
+      input,
+      audioContext.sampleRate,
+      wakeSampleRate
+    );
 
     wakeSocket.send(wakePCM.buffer);
   }
@@ -552,8 +529,6 @@ async function startCrumbs() {
         analyser
       );
 
-      startMicMeter(analyser);
-
       const samples =
         new Float32Array(
           analyser.fftSize
@@ -579,7 +554,13 @@ async function startCrumbs() {
 
       micProcessor = audioContext.createScriptProcessor(2048, 1, 1);
       micProcessor.onaudioprocess = (event) => {
-        handleMicAudioFrame(event.inputBuffer.getChannelData(0));
+        const input = event.inputBuffer.getChannelData(0);
+        let sumSquares = 0;
+        for (const sample of input) {
+          sumSquares += sample * sample;
+        }
+        updateMicMeter(Math.sqrt(sumSquares / input.length), performance.now());
+        handleMicAudioFrame(input);
       };
       source.connect(micProcessor);
       micProcessor.connect(silentGain);
@@ -805,11 +786,6 @@ async function startCrumbs() {
       console.error(
         error
       );
-
-      if (micMeterTimer !== null) {
-        clearTimeout(micMeterTimer);
-        micMeterTimer = null;
-      }
 
       if (micStream) {
         for (const track of micStream.getTracks()) {
@@ -1216,11 +1192,6 @@ function connectWakeWord() {
               wakeSampleRate =
                 data.sampleRate;
 
-              wakeResampler = createStreamingPcm16Resampler(
-                audioContext.sampleRate,
-                wakeSampleRate
-              );
-
               wakeReady =
                 true;
 
@@ -1262,9 +1233,6 @@ function connectWakeWord() {
               if (wakewordInputStatus) {
                 const rms = Number(data.rmsDbfs);
                 const peak = Number(data.peakDbfs);
-                if (Number.isFinite(rms)) {
-                  updateMicMeter(Math.pow(10, rms / 20), performance.now());
-                }
                 wakewordInputStatus.textContent =
                   Number.isFinite(rms) && Number.isFinite(peak)
                     ? `Browser ${audioContext.sampleRate} Hz → Sherpa ${wakeSampleRate} Hz · ${Math.round(rms)} dBFS RMS, ${Math.round(peak)} dBFS peak`
@@ -1822,49 +1790,6 @@ function resampleToPCM16(
 
   return output;
 }
-
-function createStreamingPcm16Resampler(inputSampleRate, outputSampleRate) {
-  if (inputSampleRate === outputSampleRate) {
-    return (input) => resampleToPCM16(input, inputSampleRate, outputSampleRate);
-  }
-
-  const sourceStep = inputSampleRate / outputSampleRate;
-  let inputSamplesSeen = 0;
-  let outputSamplesProduced = 0;
-  let previousSample = null;
-
-  return (input) => {
-    if (!input.length) return new Int16Array(0);
-
-    const lastAvailableIndex = inputSamplesSeen + input.length - 1;
-    const output = [];
-
-    while (outputSamplesProduced * sourceStep + 1 <= lastAvailableIndex) {
-      const sourcePosition = outputSamplesProduced * sourceStep;
-      const leftIndex = Math.floor(sourcePosition);
-      const rightIndex = leftIndex + 1;
-      const fraction = sourcePosition - leftIndex;
-      const leftSample = leftIndex < inputSamplesSeen
-        ? previousSample
-        : input[leftIndex - inputSamplesSeen];
-      const rightSample = rightIndex < inputSamplesSeen
-        ? previousSample
-        : input[rightIndex - inputSamplesSeen];
-      const sample = Math.max(-1, Math.min(
-        1,
-        leftSample * (1 - fraction) + rightSample * fraction
-      ));
-
-      output.push(sample < 0 ? sample * 0x8000 : sample * 0x7fff);
-      outputSamplesProduced++;
-    }
-
-    previousSample = input[input.length - 1];
-    inputSamplesSeen += input.length;
-    return Int16Array.from(output);
-  };
-}
-
 
 // ============================================================
 // FINAL TRANSCRIPT -> GPT
