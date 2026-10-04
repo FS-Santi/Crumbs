@@ -39,7 +39,7 @@
       </div>
     </section>
 
-    <p class="hint" id="start-hint">Tap Crumbs for settings</p>
+    <p class="hint" id="start-hint">Touch anywhere for settings</p>
 
     <div class="settings-overlay" id="settings-overlay" hidden aria-hidden="true">
       <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -51,18 +51,7 @@
           <button class="design-option" type="button" data-design-select="toaster" aria-pressed="true">Toaster face</button>
           <button class="design-option" type="button" data-design-select="minimal" aria-pressed="false">Eyes only</button>
         </div>
-        <div class="mic-meter" id="mic-meter" data-state="waiting">
-          <div class="mic-meter-heading">
-            <span class="mic-meter-title">Microphone input</span>
-            <span class="mic-meter-status" id="mic-meter-status">Waiting for Crumbs</span>
-          </div>
-          <div class="mic-meter-track" id="mic-meter-track" role="meter" aria-label="Microphone input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <span class="mic-meter-fill" id="mic-meter-fill"></span>
-          </div>
-          <p class="mic-meter-readout" id="mic-meter-readout">-- dBFS</p>
-          <p class="mic-meter-engine" id="wakeword-input-status">Wake engine: waiting for audio</p>
-        </div>
-        <p class="settings-note" id="settings-note">Speak near the Jabra; the meter shows the microphone signal reaching Chromium.</p>
+        <p class="settings-note" id="settings-note">Crumbs starts listening automatically. The browser may ask once for microphone access.</p>
       </section>
     </div>
   </main>

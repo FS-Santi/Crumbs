@@ -46,8 +46,6 @@ Put the card in the Pi, connect the display and audio devices, and power it on. 
 
 The kiosk enables audio autoplay and automatically grants the browser microphone permission, which is needed for hands-free startup.
 
-On startup, the kiosk log records the OS, kernel, PipeWire and WirePlumber versions, then selects the Jabra sink and source by parsing `wpctl status -n`. This uses the `wpctl` command available in Raspberry Pi OS Trixie; `wpctl list` is not available in its WirePlumber 0.5.8 package. The audio rule is installed in the configuration format supported by the detected WirePlumber version.
-
 ## If startup fails
 
 Connect a keyboard or SSH in using the account you created in Imager. Check the first-boot log:
@@ -70,18 +68,10 @@ The health response should include `"wakeWordEnabled":true`. The installer keeps
 sudo bash /boot/firmware/crumbs-firstboot.sh
 ```
 
-For Jabra audio startup details, inspect the most recent kiosk log:
-
-```sh
-tail -n 120 /tmp/crumbs-kiosk.log
-```
-
-The log includes PipeWire's audio topology before Chromium opens, so it shows whether the Jabra source and sink were visible and selected.
-
 After a successful install, the staged `crumbs.env` is removed from the boot volume and the credentials live in `/etc/crumbs/crumbs.env`, readable only by root and the Crumbs service group.
 
 ## Important deployment detail
 
-The first-boot installer deploys the latest code from GitHub branch `Main`. Push the code you want the Pi to run to `FS-Santi/Crumbs` branch `Main` before preparing the card. The repository must be publicly readable by the Pi.
+The first-boot installer deploys the latest code from GitHub branch `Main`. This workspace has no Git metadata or configured remote, so its local changes are not automatically on GitHub. Push the code you want the Pi to run to `FS-Santi/Crumbs` branch `Main` before preparing the card. The repository must be publicly readable by the Pi.
 
 The finished enclosure, microphone and speaker, Pi RAM size, cooling, and power supply still need a hands-on check on the actual toaster.

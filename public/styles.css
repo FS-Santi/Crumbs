@@ -13,8 +13,6 @@
 
 * { box-sizing: border-box; }
 
-html, body, body * { cursor: none !important; }
-
 html, body { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
 
 body {
@@ -128,40 +126,7 @@ button { font: inherit; }
 .settings-description { margin: 8px 0 19px; color: #887669; font-size: 14px; }
 .settings-panel .design-picker { width: 100%; padding: 5px; }
 .settings-panel .design-option { flex: 1; min-height: 48px; }
-.mic-meter {
-  margin-top: 18px;
-  padding: 13px 14px 9px;
-  border-radius: 15px;
-  background: #f3ecdf;
-  text-align: left;
-}
-
-.mic-meter-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.mic-meter-title { color: #615246; font-size: 12px; font-weight: 800; }
-.mic-meter-status { color: #9a8876; font-size: 11px; text-align: right; }
-.mic-meter[data-state="signal"] .mic-meter-status { color: #438067; }
-.mic-meter[data-state="error"] .mic-meter-status { color: #bd5948; }
-.mic-meter-track {
-  height: 10px;
-  margin-top: 10px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #dfd4c2;
-}
-.mic-meter-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #88b887 0%, #e8bb66 72%, #e9785d 100%);
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform .12s linear;
-}
-.mic-meter-readout { margin: 5px 0 0; color: #9a8876; font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
-.mic-meter-engine { margin: 7px 0 0; color: #887669; font-size: 11px; line-height: 1.35; }
-.mic-meter[data-state="signal"] .mic-meter-engine { color: #438067; }
-.settings-note { min-height: 20px; margin: 12px 0 0; color: #9a8876; font-size: 12px; line-height: 1.45; }
+.settings-note { min-height: 20px; margin: 18px 0 0; color: #9a8876; font-size: 12px; line-height: 1.45; }
 
 .crumbs {
   position: relative;
@@ -172,7 +137,6 @@ button { font: inherit; }
   align-items: flex-end;
   justify-content: center;
   isolation: isolate;
-  scale: 1.21;
   animation: bob 3.7s ease-in-out infinite;
   --eye-height: 17px;
   --eye-scale: 1;

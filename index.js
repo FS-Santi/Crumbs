@@ -190,32 +190,59 @@ try {
 
   for (const file of requiredFiles) {
     if (!fs.existsSync(file)) {
-      throw new Error(`Missing wake-word file: ${file}`);
+      throw new Error(
+        `Missing wake-word file: ${file}`
+      );
     }
   }
 
-  keywordSpotter = new sherpa.KeywordSpotter({
-    featConfig: { sampleRate: 16000, featureDim: 80 },
-    modelConfig: {
-      transducer: {
-        encoder: wakeFiles.encoder,
-        decoder: wakeFiles.decoder,
-        joiner: wakeFiles.joiner
+  keywordSpotter =
+    new sherpa.KeywordSpotter({
+      featConfig: {
+        sampleRate: 16000,
+        featureDim: 80
       },
-      tokens: wakeFiles.tokens,
-      numThreads: 1,
-      provider: "cpu",
-      debug: 0
-    },
-    maxActivePaths: 4,
-    keywordsScore: 1.5,
-    keywordsThreshold: 0.25,
-    keywordsFile: WAKE_KEYWORDS_FILE
-  });
 
-  console.log("Wake word ready: CRUMBS");
+      modelConfig: {
+        transducer: {
+          encoder:
+            wakeFiles.encoder,
+
+          decoder:
+            wakeFiles.decoder,
+
+          joiner:
+            wakeFiles.joiner
+        },
+
+        tokens:
+          wakeFiles.tokens,
+
+        numThreads: 1,
+
+        provider: "cpu",
+
+        debug: 0
+      },
+
+      maxActivePaths: 4,
+
+      keywordsScore: 1.5,
+
+      keywordsThreshold: 0.25,
+
+      keywordsFile:
+        WAKE_KEYWORDS_FILE
+    });
+
+  console.log(
+    "Wake word ready: CRUMBS"
+  );
 } catch (error) {
-  console.warn("⚠️ Wake word error:", error.message);
+  console.warn(
+    "⚠️ Wake word error:",
+    error.message
+  );
 }
 
 
@@ -575,66 +602,115 @@ wakeWordWss.on(
       browserSocket.send(
         JSON.stringify({
           type: "error",
-          error: "Sherpa wake-word model is not configured. Check the model files, WAKE_MODEL_DIR, and WAKE_KEYWORDS_FILE."
+
+          error:
+            "Sherpa wake-word model is not configured. Check the model files, WAKE_MODEL_DIR, and WAKE_KEYWORDS_FILE."
         })
       );
+
       browserSocket.close();
+
       return;
     }
 
-    const keywordStream = keywordSpotter.createStream();
-    let levelSquares = 0;
-    let levelPeak = 0;
-    let levelCount = 0;
-    let lastLevelReportAt = Date.now();
+    const keywordStream =
+      keywordSpotter.createStream();
 
-    browserSocket.send(JSON.stringify({ type: "config", sampleRate: 16000 }));
+    browserSocket.send(
+      JSON.stringify({
+        type: "config",
+
+        sampleRate:
+          16000
+      })
+    );
 
     browserSocket.on(
       "message",
       (data, isBinary) => {
-        if (!isBinary) return;
-
-        const pcm = Buffer.from(data);
-        const sampleCount = Math.floor(pcm.length / 2);
-        if (sampleCount === 0) return;
-
-        const samples = new Float32Array(sampleCount);
-        for (let i = 0; i < sampleCount; i++) {
-          const sample = pcm.readInt16LE(i * 2) / 32768;
-          samples[i] = sample;
-          levelSquares += sample * sample;
-          levelPeak = Math.max(levelPeak, Math.abs(sample));
-          levelCount++;
+        if (!isBinary) {
+          return;
         }
 
-        keywordStream.acceptWaveform({ sampleRate: 16000, samples });
-        while (keywordSpotter.isReady(keywordStream)) {
-          keywordSpotter.decode(keywordStream);
-          const result = keywordSpotter.getResult(keywordStream);
-          if (result.keyword) {
-            console.log("👀 WAKE WORD DETECTED:", result.keyword);
-            keywordSpotter.reset(keywordStream);
-            if (browserSocket.readyState === WebSocket.OPEN) {
-              browserSocket.send(JSON.stringify({ type: "wake", label: "Crumbs" }));
+        const pcm =
+          Buffer.from(data);
+
+        const sampleCount =
+          Math.floor(
+            pcm.length / 2
+          );
+
+        if (
+          sampleCount === 0
+        ) {
+          return;
+        }
+
+        const samples =
+          new Float32Array(
+            sampleCount
+          );
+
+        for (
+          let i = 0;
+          i < sampleCount;
+          i++
+        ) {
+          samples[i] =
+            pcm.readInt16LE(
+              i * 2
+            ) /
+            32768;
+        }
+
+        keywordStream.acceptWaveform({
+          sampleRate: 16000,
+          samples
+        });
+
+        while (
+          keywordSpotter.isReady(
+            keywordStream
+          )
+        ) {
+          keywordSpotter.decode(
+            keywordStream
+          );
+
+          const result =
+            keywordSpotter.getResult(
+              keywordStream
+            );
+
+          if (
+            result.keyword &&
+            result.keyword.length > 0
+          ) {
+            console.log(
+              "👀 WAKE WORD DETECTED:",
+              result.keyword
+            );
+
+            keywordSpotter.reset(
+              keywordStream
+            );
+
+            if (
+              browserSocket.readyState ===
+              WebSocket.OPEN
+            ) {
+              browserSocket.send(
+                JSON.stringify({
+                  type: "wake",
+
+                  label:
+                    "Crumbs"
+                })
+              );
             }
+
             break;
           }
-        }
-
-        const now = Date.now();
-        if (now - lastLevelReportAt >= 1000 && browserSocket.readyState === WebSocket.OPEN) {
-          const rms = Math.sqrt(levelSquares / Math.max(1, levelCount));
-          const toDbfs = (value) => value > 0 ? Math.max(-80, 20 * Math.log10(value)) : -80;
-          browserSocket.send(JSON.stringify({
-            type: "audio-level",
-            rmsDbfs: toDbfs(rms),
-            peakDbfs: toDbfs(levelPeak)
-          }));
-          levelSquares = 0;
-          levelPeak = 0;
-          levelCount = 0;
-          lastLevelReportAt = now;
         }
       }
     );
