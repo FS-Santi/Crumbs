@@ -341,13 +341,13 @@ let silenceStarted =
 // ============================================================
 
 const SILENCE_MS =
-  1100;
+  450;
 
 const MIN_RECORDING_MS =
   350;
 
 const MAX_RECORDING_MS =
-  30000;
+  15000;
 
 const BARGE_IN_MS =
   180;
@@ -355,9 +355,9 @@ const BARGE_IN_MS =
 const STT_SAMPLE_RATE =
   24000;
 
-// Give the user time to begin speaking after the wake word.
+// Crumbs remains conversational for 5 seconds.
 const AWAKE_TIMEOUT_MS =
-  15000;
+  5000;
 
 
 // ============================================================
@@ -385,16 +385,15 @@ async function startCrumbs() {
       micStream =
         await navigator.mediaDevices
           .getUserMedia({
-            // Keep the Jabra's mic signal natural for Sherpa wake-word detection.
             audio: {
               echoCancellation:
-                false,
+                true,
 
               noiseSuppression:
-                false,
+                true,
 
               autoGainControl:
-                false
+                true
             }
           });
 
