@@ -408,6 +408,8 @@ let wakeConnectPromise = null;
 let wakeSampleRate =
   16000;
 
+let wakeResampler = null;
+
 let awake = false;
 
 let awakeTimer = null;
@@ -460,11 +462,9 @@ function handleMicAudioFrame(input) {
     wakeSocket &&
     wakeSocket.readyState === WebSocket.OPEN
   ) {
-    const wakePCM = resampleToPCM16(
-      input,
-      audioContext.sampleRate,
-      wakeSampleRate
-    );
+    const wakePCM = wakeResampler
+      ? wakeResampler(input)
+      : resampleToPCM16(input, audioContext.sampleRate, wakeSampleRate);
 
     wakeSocket.send(wakePCM.buffer);
   }
@@ -523,6 +523,11 @@ async function startCrumbs() {
               autoGainControl: true
             }
           });
+
+      const micTrackRate = micStream.getAudioTracks()[0]?.getSettings().sampleRate;
+      console.log(
+        `Microphone rates: track ${micTrackRate || "unknown"} Hz; Web Audio ${audioContext.sampleRate} Hz; Sherpa 16000 Hz`
+      );
 
       setMicMeterStatus("ready", "Mic opened — speak to test");
 
@@ -1211,6 +1216,11 @@ function connectWakeWord() {
               wakeSampleRate =
                 data.sampleRate;
 
+              wakeResampler = createStreamingPcm16Resampler(
+                audioContext.sampleRate,
+                wakeSampleRate
+              );
+
               wakeReady =
                 true;
 
@@ -1257,8 +1267,8 @@ function connectWakeWord() {
                 }
                 wakewordInputStatus.textContent =
                   Number.isFinite(rms) && Number.isFinite(peak)
-                    ? `Sherpa input: ${Math.round(rms)} dBFS RMS, ${Math.round(peak)} dBFS peak`
-                    : "Sherpa is receiving audio";
+                    ? `Browser ${audioContext.sampleRate} Hz → Sherpa ${wakeSampleRate} Hz · ${Math.round(rms)} dBFS RMS, ${Math.round(peak)} dBFS peak`
+                    : `Browser ${audioContext.sampleRate} Hz → Sherpa ${wakeSampleRate} Hz`;
               }
 
               return;
@@ -1811,6 +1821,48 @@ function resampleToPCM16(
   }
 
   return output;
+}
+
+function createStreamingPcm16Resampler(inputSampleRate, outputSampleRate) {
+  if (inputSampleRate === outputSampleRate) {
+    return (input) => resampleToPCM16(input, inputSampleRate, outputSampleRate);
+  }
+
+  const sourceStep = inputSampleRate / outputSampleRate;
+  let inputSamplesSeen = 0;
+  let outputSamplesProduced = 0;
+  let previousSample = null;
+
+  return (input) => {
+    if (!input.length) return new Int16Array(0);
+
+    const lastAvailableIndex = inputSamplesSeen + input.length - 1;
+    const output = [];
+
+    while (outputSamplesProduced * sourceStep + 1 <= lastAvailableIndex) {
+      const sourcePosition = outputSamplesProduced * sourceStep;
+      const leftIndex = Math.floor(sourcePosition);
+      const rightIndex = leftIndex + 1;
+      const fraction = sourcePosition - leftIndex;
+      const leftSample = leftIndex < inputSamplesSeen
+        ? previousSample
+        : input[leftIndex - inputSamplesSeen];
+      const rightSample = rightIndex < inputSamplesSeen
+        ? previousSample
+        : input[rightIndex - inputSamplesSeen];
+      const sample = Math.max(-1, Math.min(
+        1,
+        leftSample * (1 - fraction) + rightSample * fraction
+      ));
+
+      output.push(sample < 0 ? sample * 0x8000 : sample * 0x7fff);
+      outputSamplesProduced++;
+    }
+
+    previousSample = input[input.length - 1];
+    inputSamplesSeen += input.length;
+    return Int16Array.from(output);
+  };
 }
 
 
