@@ -132,12 +132,76 @@ else
   echo "wpctl is unavailable; Chromium will use the system defaults."
 fi
 
-exec "$CHROMIUM" \
+CHROMIUM_PROFILE="$HOME/.config/chromium-crumbs"
+
+"$CHROMIUM" \
   --kiosk \
   --noerrdialogs \
   --disable-infobars \
   --no-first-run \
   --autoplay-policy=no-user-gesture-required \
   --use-fake-ui-for-media-stream \
-  --user-data-dir="$HOME/.config/chromium-crumbs" \
-  "$APP_URL"
+  --user-data-dir="$CHROMIUM_PROFILE" \
+  "$APP_URL" &
+PRIMING_CHROMIUM_PID=$!
+
+# Let the page request microphone access before the PipeWire recovery. If the
+# Chromium link never appears, still perform the recovery and reopen the kiosk.
+if command -v pw-link >/dev/null 2>&1; then
+  attempt=0
+  while [ "$attempt" -lt 30 ]; do
+    if pw-link -l 2>/dev/null | awk '
+      tolower($0) ~ /^alsa_input.*jabra.*capture_/ { source = 1; next }
+      source && tolower($0) ~ /chromium input:input_/ { found = 1 }
+      END { exit !found }
+    '; then
+      echo "Jabra capture is connected to Chromium."
+      break
+    fi
+    if ! kill -0 "$PRIMING_CHROMIUM_PID" 2>/dev/null; then
+      echo "The initial Chromium process exited before audio recovery." >&2
+      wait "$PRIMING_CHROMIUM_PID" || true
+      exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+fi
+
+if command -v systemctl >/dev/null 2>&1 &&
+  systemctl --user restart pipewire pipewire-pulse wireplumber; then
+  echo "PipeWire user services restarted after Chromium startup."
+
+  attempt=0
+  while [ "$attempt" -lt 30 ]; do
+    if AUDIO_STATUS="$(wpctl status -n 2>/dev/null)"; then
+      JABRA_SINK_ID="$(find_jabra_node_id "$AUDIO_STATUS" sink)"
+      JABRA_SOURCE_ID="$(find_jabra_node_id "$AUDIO_STATUS" source)"
+      if [ -n "$JABRA_SINK_ID" ] && [ -n "$JABRA_SOURCE_ID" ]; then
+        wpctl set-default "$JABRA_SINK_ID" || true
+        wpctl set-default "$JABRA_SOURCE_ID" || true
+        echo "Restored Jabra defaults after PipeWire restart: sink=$JABRA_SINK_ID source=$JABRA_SOURCE_ID"
+        break
+      fi
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+
+  # The first Chromium microphone stream belongs to the pre-restart audio
+  # graph. Replace it so the page opens a fresh capture stream.
+  pkill -u "$(id -u)" -f -- "$CHROMIUM_PROFILE" 2>/dev/null || true
+  wait "$PRIMING_CHROMIUM_PID" 2>/dev/null || true
+  exec "$CHROMIUM" \
+    --kiosk \
+    --noerrdialogs \
+    --disable-infobars \
+    --no-first-run \
+    --autoplay-policy=no-user-gesture-required \
+    --use-fake-ui-for-media-stream \
+    --user-data-dir="$CHROMIUM_PROFILE" \
+    "$APP_URL"
+else
+  echo "PipeWire restart failed; keeping the initial Chromium session." >&2
+  wait "$PRIMING_CHROMIUM_PID"
+fi
