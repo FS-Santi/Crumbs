@@ -122,6 +122,7 @@ exec "$CHROMIUM" \
   --kiosk \
   --noerrdialogs \
   --disable-infobars \
+  --disable-cache \
   --no-first-run \
   --autoplay-policy=no-user-gesture-required \
   --use-fake-ui-for-media-stream \
