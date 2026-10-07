@@ -387,13 +387,13 @@ async function startCrumbs() {
           .getUserMedia({
             audio: {
               echoCancellation:
-                true,
+                false,
 
               noiseSuppression:
-                true,
+                false,
 
               autoGainControl:
-                true
+                false
             }
           });
 

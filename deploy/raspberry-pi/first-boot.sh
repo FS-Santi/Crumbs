@@ -110,7 +110,7 @@ if [ -z "$CHROMIUM" ]; then
   exit 1
 fi
 attempt=0
-until curl -fsS "$APP_URL/" >/dev/null; do
+until curl -fsS "$APP_URL/healthz" >/dev/null; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 60 ]; then
     echo "Crumbs did not become ready at $APP_URL" >&2
@@ -118,6 +118,41 @@ until curl -fsS "$APP_URL/" >/dev/null; do
   fi
   sleep 1
 done
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+wait_for_jabra_source() {
+  attempt=0
+  until wpctl status 2>/dev/null | grep -Fq 'Jabra SPEAK 410 Mono'; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 30 ]; then
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+echo "Waiting for Jabra SPEAK 410 capture source."
+if ! wait_for_jabra_source; then
+  echo "Jabra SPEAK 410 capture source did not appear within 30 seconds." >&2
+  exit 1
+fi
+
+sleep 5
+echo "Restarting PipeWire after Jabra enumeration."
+systemctl --user restart pipewire pipewire-pulse wireplumber
+sleep 3
+
+echo "Waiting for Jabra SPEAK 410 capture source after PipeWire restart."
+if ! wait_for_jabra_source; then
+  echo "Jabra SPEAK 410 capture source did not return within 30 seconds." >&2
+  exit 1
+fi
+
+wpctl set-volume @DEFAULT_SOURCE@ 100%
+wpctl set-mute @DEFAULT_SOURCE@ 0
+rm -rf "$HOME/.config/chromium-crumbs"
+
 exec "$CHROMIUM" \
   --kiosk \
   --noerrdialogs \
@@ -142,6 +177,28 @@ if [ -z "$DESKTOP_USER" ] || [ -z "$DESKTOP_HOME" ]; then
   echo "Could not determine the desktop user's account details."
   exit 1
 fi
+
+WIREPLUMBER_CONFIG_DIR="$DESKTOP_HOME/.config/wireplumber/wireplumber.conf.d"
+install -d -o "$DESKTOP_USER" -g "$DESKTOP_USER" -m 0755 "$WIREPLUMBER_CONFIG_DIR"
+cat > "$WIREPLUMBER_CONFIG_DIR/51-jabra.conf" <<'WIREPLUMBER_RULE'
+monitor.alsa.rules = [
+  {
+    matches = [
+      {
+        node.name = "~alsa_input.usb-0b0e_Jabra_SPEAK_410_.*"
+      }
+    ]
+    actions = {
+      update-props = {
+        session.suspend-timeout-seconds = 0
+        priority.session = 3000
+      }
+    }
+  }
+]
+WIREPLUMBER_RULE
+chown "$DESKTOP_USER:$DESKTOP_USER" "$WIREPLUMBER_CONFIG_DIR/51-jabra.conf"
+chmod 0644 "$WIREPLUMBER_CONFIG_DIR/51-jabra.conf"
 
 if command -v raspi-config >/dev/null 2>&1; then
   raspi-config nonint do_boot_behaviour B4
